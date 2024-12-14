@@ -98,8 +98,8 @@ def table_exists(connection, table_name):
 
 def storeEquitData():
     # Add index as a column for storage
-    eqtyData.reset_index(inplace=True)
-    eqtyData.rename(columns={"index": "date"}, inplace=True)
+    eqtyDataMthly.reset_index(inplace=True)
+    eqtyDataMthly.rename(columns={"index": "date"}, inplace=True)
 
     # SQLite database file name
     
@@ -107,14 +107,14 @@ def storeEquitData():
     # Connect to SQLite database (creates the database file if it doesn't exist)
     connection = sqlite3.connect(sqlite_db)
 
-    # Store eqtyData in the SQLite database
+    # Store eqtyDataMthly in the SQLite database
     
     try:
         if table_exists(connection, table_name):
             print(f"Table '{table_name}' already exists. Skipping data insertion.")
         else:
             # Write DataFrame to SQLite
-            eqtyData.to_sql(table_name, connection, if_exists="replace", index=False)
+            eqtyDataMthly.to_sql(table_name, connection, if_exists="replace", index=False)
             print(f"Data successfully stored in table '{table_name}' of {sqlite_db}")
     except Exception as e:
         print(f"Error occurred: {e}")
@@ -181,7 +181,7 @@ except Exception as e:
     print(f"An unexpected error occurred: {e}")
 
 retreiveDBData(table_name)
-print('done')
+print('done after macro DB data')
 sys.exit(1)
 
 
