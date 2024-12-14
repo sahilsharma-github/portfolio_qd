@@ -1,6 +1,7 @@
 import yfinance as yf
 import pandas as pd
-
+import sys
+import sqlite3
 # Define the ticker symbols for the indices and Gold
 tickers = {
     "S&P 500": "^GSPC",
@@ -54,6 +55,8 @@ eqtyData = closing_prices_monthly.iloc[:, :3]
 eqtyData.columns = ['S&P500', 'ACWI', 'MSCIEM']
 print(eqtyData)
 
+
+
 # Calculating monthly price returns 
 eqtyDataMthly = eqtyData.pct_change().dropna()
 eqtyDataMthly.sort_index(ascending=False, inplace=True)
@@ -63,20 +66,11 @@ print(eqtyDataMthly)
 ############################################################################################################
 # Loading csv from the macro variables file
 # Define the folder path and file name
-folder_path = "C:/Users/Arif/Documents/portfolio/portfolio_qd"  # Replace with your folder path
+#folder_path = "C:/Users/Arif/Documents/portfolio/portfolio_qd"  # Replace with your folder path
 file_name = "macro.csv"          # Replace with your CSV file name
+file_path = f"{file_name}"
+import pandas as pd
 
-# Construct the full file path
-file_path = f"{folder_path}/{file_name}"
-
-# Load the CSV file into a Pandas DataFrame
-macro = pd.read_csv(file_path)
-
-# Display the first few rows of the DataFrame
-macro.set_index('Date', inplace=True)
-macro = macro.dropna()
-macro.index = macro.index.strftime('%Y-%m-%d')
-print(macro)
 
 
 
@@ -84,9 +78,111 @@ print(macro)
 # Build a relational database in any publicly available DB
 # Load equity monthly returns data into the DB
 # Load macro data into DB
+sqlite_db = "financial_data.db"
+table_name = "equity_indices"
 
+def table_exists(connection, table_name):
+    """
+    Check if a table exists in the SQLite database.
+    :param connection: SQLite connection object.
+    :param table_name: Name of the table to check.
+    :return: True if the table exists, False otherwise.
+    """
+    query = """
+    SELECT name FROM sqlite_master WHERE type='table' AND name=?;
+    """
+    cursor = connection.cursor()
+    cursor.execute(query, (table_name,))
+    result = cursor.fetchone()
+    return result is not None
 
+def storeEquitData():
+    # Add index as a column for storage
+    eqtyData.reset_index(inplace=True)
+    eqtyData.rename(columns={"index": "date"}, inplace=True)
 
+    # SQLite database file name
+    
+
+    # Connect to SQLite database (creates the database file if it doesn't exist)
+    connection = sqlite3.connect(sqlite_db)
+
+    # Store eqtyData in the SQLite database
+    
+    try:
+        if table_exists(connection, table_name):
+            print(f"Table '{table_name}' already exists. Skipping data insertion.")
+        else:
+            # Write DataFrame to SQLite
+            eqtyData.to_sql(table_name, connection, if_exists="replace", index=False)
+            print(f"Data successfully stored in table '{table_name}' of {sqlite_db}")
+    except Exception as e:
+        print(f"Error occurred: {e}")
+    finally:
+        connection.close()
+
+def retreiveDBData(table_name):
+    # To verify data storage
+    # Reconnect and read data back from the SQLite database
+    connection = sqlite3.connect(sqlite_db)
+    retrieved_data = pd.read_sql(f"SELECT * FROM {table_name}", connection)
+    connection.close()
+
+    # Display the retrieved data
+    print("\nRetrieved Data for ", table_name, " : ")
+    print(retrieved_data)
+
+storeEquitData()
+retreiveDBData(table_name)
+
+# File name for the macro CSV
+file_name = "macro.csv"
+table_name= "macros"
+try:
+    # Load the CSV file into a pandas DataFrame
+    macro_data = pd.read_csv(file_name)
+    
+    # Convert 'Date' column to datetime if it exists
+    if 'Date' in macro_data.columns:
+        macro_data['Date'] = pd.to_datetime(macro_data['Date'])
+    else:
+        raise KeyError("The 'Date' column is missing from the CSV file.")
+    
+    # Ensure the DataFrame has no missing values
+    macro_data.dropna(inplace=True)
+    
+    # Connect to SQLite database
+    connection = sqlite3.connect(sqlite_db)
+    
+    # Check if the table already exists in the SQLite database
+    def table_exists(conn, table_name):
+        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?;"
+        cursor = conn.cursor()
+        cursor.execute(query, (table_name,))
+        return cursor.fetchone() is not None
+    
+    # Insert data into the SQLite database
+    if table_exists(connection, table_name):
+        print(f"Table '{table_name}' already exists. Skipping data insertion.")
+    else:
+        macro_data.to_sql(table_name, connection, if_exists="replace", index=False)
+        print(f"Data successfully stored in table '{table_name}' of {sqlite_db}.")
+    
+    # Close the connection
+    connection.close()
+
+except FileNotFoundError:
+    print(f"Error: File '{file_name}' not found.")
+except KeyError as e:
+    print(f"Error: {e}")
+except pd.errors.EmptyDataError:
+    print(f"Error: File '{file_name}' is empty.")
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
+
+retreiveDBData(table_name)
+print('done')
+sys.exit(1)
 
 
 
