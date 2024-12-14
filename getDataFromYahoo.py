@@ -34,7 +34,7 @@ def download_monthly_closing_prices(tickers, start_date, end_date):
 
 # Define date range
 start_date = "2010-01-01"
-end_date = "2024-12-31"
+end_date = "2024-11-30"
 
 # Download data
 try:
@@ -47,3 +47,193 @@ try:
     print("Data downloaded and saved to monthly_closing_prices_with_gold.csv")
 except ValueError as e:
     print(e)
+
+############################################################################################################
+# Cleaning Equity index price data 
+eqtyData = closing_prices_monthly.iloc[:, :3]
+eqtyData.columns = ['S&P500', 'ACWI', 'MSCIEM']
+print(eqtyData)
+
+# Calculating monthly price returns 
+eqtyDataMthly = eqtyData.pct_change().dropna()
+eqtyDataMthly.sort_index(ascending=False, inplace=True)
+print(eqtyDataMthly)
+
+
+############################################################################################################
+# Loading csv from the macro variables file
+# Define the folder path and file name
+folder_path = "C:/Users/Arif/Documents/portfolio/portfolio_qd"  # Replace with your folder path
+file_name = "macro.csv"          # Replace with your CSV file name
+
+# Construct the full file path
+file_path = f"{folder_path}/{file_name}"
+
+# Load the CSV file into a Pandas DataFrame
+macro = pd.read_csv(file_path)
+
+# Display the first few rows of the DataFrame
+macro.set_index('Date', inplace=True)
+macro = macro.dropna()
+macro.index = macro.index.strftime('%Y-%m-%d')
+print(macro)
+
+
+
+#############################################################################################################
+# Build a relational database in any publicly available DB
+# Load equity monthly returns data into the DB
+# Load macro data into DB
+
+
+
+
+
+
+
+#############################################################################################################
+# Creating portfolio returns function 
+
+# Function to calculate portfolio returns
+def calculate_portfolio_returns(asset_returns, weight1, weight2, weight3):
+    """
+    Calculate portfolio returns based on user-defined weights for three assets.
+
+    Parameters:
+        asset_returns (pd.DataFrame): A DataFrame containing the time series of returns for 3 assets with columns ['Asset 1', 'Asset 2', 'Asset 3'].
+        weight1 (float): Weight of Asset 1 in the portfolio (percentage).
+        weight2 (float): Weight of Asset 2 in the portfolio (percentage).
+        weight3 (float): Weight of Asset 3 in the portfolio (percentage).
+
+    Returns:
+        pd.Series: A time series of portfolio returns.
+    """
+    # Check if weights sum to 100%
+    total_weight = weight1 + weight2 + weight3
+    if total_weight != 100:
+        raise ValueError(f"The weights must sum to 100%. Current sum: {total_weight}%")
+
+    # Convert weights to decimal form
+    weight1 /= 100
+    weight2 /= 100
+    weight3 /= 100
+
+    # Calculate portfolio returns
+    portfolio_returns = (
+        weight1 * asset_returns['S&P500'] +
+        weight2 * asset_returns['ACWI'] +
+        weight3 * asset_returns['MSCIEM']
+    )
+
+    return portfolio_returns
+
+
+try:
+   # eqtyDataMthly['PtfRtns'] = calculate_portfolio_returns(eqtyDataMthly, 40, 30, 30)
+    portfolio_Rtn = pd.DataFrame(calculate_portfolio_returns(eqtyDataMthly, 40, 30, 30), columns=['PtfRtns'])
+    portfolio_Rtn.index = portfolio_Rtn.index.strftime('%Y-%m-%d')
+    print("\nPortfolio Returns:")
+    print(portfolio_Rtn)
+except ValueError as e:
+    print(f"Error: {e}")
+
+
+
+#############################################################################################################################################################
+# Doing lasso regression for portfolio returns against macro variables 
+# Independent variables are macro variables, dependent variable is portfolio return 
+#
+
+# Creating the retruns and macri variaables dataframe
+df = pd.concat([portfolio_Rtn, macro], axis=1)
+df = df.dropna()
+
+
+
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import Lasso
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+
+# Example DataFrame (replace this with your actual data)
+dates = pd.date_range(start="2000-01-01", periods=100, freq="M")
+data = {
+    'Portfolio_Returns': np.random.normal(0, 0.01, len(dates)),
+    'Macro_Variable_1': np.random.normal(0, 0.02, len(dates)),
+    'Macro_Variable_2': np.random.normal(0, 0.02, len(dates)),
+    'Macro_Variable_3': np.random.normal(0, 0.02, len(dates))
+}
+df = pd.DataFrame(data, index=dates)
+
+# Rolling window size
+rolling_window = 24
+
+# Initialize results storage
+rolling_betas = []
+rolling_correlations = []
+
+# Standardize the data
+def standardize(df):
+    scaler = StandardScaler()
+    return pd.DataFrame(scaler.fit_transform(df), index=df.index, columns=df.columns)
+
+# Perform rolling Lasso regression
+for start in range(len(df) - rolling_window + 1):
+    # Select rolling window data
+    df_window = df.iloc[start:start + rolling_window]
+
+    # Define dependent and independent variables
+    y = df_window['Portfolio_Returns']
+    X = df_window.drop(columns=['Portfolio_Returns'])
+
+    # Standardize independent variables
+    X_scaled = standardize(X)
+
+    # Fit Lasso regression
+    lasso = Lasso(alpha=0.1, random_state=42)  # Adjust alpha as needed
+    lasso.fit(X_scaled, y)
+
+    # Store regression coefficients (betas)
+    betas = pd.Series(lasso.coef_, index=X.columns, name=df.index[start + rolling_window - 1])
+    rolling_betas.append(betas)
+
+    # Store rolling correlations between variables
+    correlations = X.corr()
+    rolling_correlations.append(correlations)
+
+# Combine rolling betas into a DataFrame
+rolling_betas_df = pd.DataFrame(rolling_betas)
+
+# Plot rolling betas
+rolling_betas_df.plot(figsize=(12, 6), title="Rolling Betas")
+plt.xlabel("Date")
+plt.ylabel("Beta Coefficient")
+plt.grid()
+plt.show()
+
+# Plot rolling correlations
+for i, corr_matrix in enumerate(rolling_correlations):
+    if i % 10 == 0:  # Plot every 10th window for visualization
+        plt.figure(figsize=(6, 5))
+        plt.title(f"Rolling Correlations (Window Ending {df.index[rolling_window + i - 1]})")
+        plt.imshow(corr_matrix, cmap="coolwarm", interpolation="none")
+        plt.colorbar(label="Correlation")
+        plt.xticks(ticks=range(len(corr_matrix)), labels=corr_matrix.columns, rotation=45)
+        plt.yticks(ticks=range(len(corr_matrix)), labels=corr_matrix.columns)
+        plt.show()
+
+# Summary and Explanation of Results
+print("Summary of Rolling Regression Results:")
+for i, betas in rolling_betas_df.iterrows():
+    print(f"Window Ending {i}: Relevant Variables:")
+    significant_vars = betas[betas != 0].index.tolist()
+    print(f"  Variables with Non-Zero Coefficients: {significant_vars}")
+    print(f"  Coefficients: {betas[betas != 0].to_dict()}")
+
+# Explanation:
+print("\nExplanation:")
+print("The rolling regression identifies how the portfolio returns are influenced by macro variables in different time windows.")
+print("\n- For each window, the Lasso regression performs variable selection by shrinking some coefficients to zero.")
+print("\n- The rolling betas plot shows the time-varying contribution of each macro variable to portfolio returns.")
+print("\n- Rolling correlations reveal interdependencies among macro variables, helping to understand how they move together.")
