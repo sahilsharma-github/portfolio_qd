@@ -249,6 +249,7 @@ def printPortFolioReturns():
         print(portfolio_Rtn)
     except ValueError as e:
         print(f"Error: {e}")
+    return portfolio_Rtn
     # Creating the returns and macro variaables dataframe
     
     macro_data.set_index('Date', inplace=True)
@@ -445,7 +446,6 @@ def gettingItAllReady():
     cleanEquityData()
     equityDataToDB()
     macroDataToDB()
-    printPortFolioReturns()
 
 gettingItAllReady()  
 
