@@ -1,1 +1,6 @@
 yfinance
+dash 
+dash-bootstrap-component
+scikit-learn
+matplotlib
+seaborn
