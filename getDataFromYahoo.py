@@ -7,7 +7,7 @@ tickers = {
     "S&P 500": "^GSPC",
     "MSCI ACWI": "ACWI",
     "MSCI EM": "EEM",
-    "Gold": "GC=F"  # Added ticker for Gold
+   # "Gold": "GC=F"  # Added ticker for Gold
 }
 
 # Function to download and resample closing price data to monthly frequency
@@ -55,8 +55,6 @@ eqtyData = closing_prices_monthly.iloc[:, :3]
 eqtyData.columns = ['S&P500', 'ACWI', 'MSCIEM']
 print(eqtyData)
 
-
-
 # Calculating monthly price returns 
 eqtyDataMthly = eqtyData.pct_change().dropna()
 eqtyDataMthly.sort_index(ascending=False, inplace=True)
@@ -69,9 +67,6 @@ print(eqtyDataMthly)
 #folder_path = "C:/Users/Arif/Documents/portfolio/portfolio_qd"  # Replace with your folder path
 file_name = "macro.csv"          # Replace with your CSV file name
 file_path = f"{file_name}"
-import pandas as pd
-
-
 
 
 #############################################################################################################
@@ -182,7 +177,7 @@ except Exception as e:
 
 retreiveDBData(table_name)
 print('done after macro DB data')
-sys.exit(1)
+
 
 
 
@@ -226,6 +221,7 @@ def calculate_portfolio_returns(asset_returns, weight1, weight2, weight3):
 
 try:
    # eqtyDataMthly['PtfRtns'] = calculate_portfolio_returns(eqtyDataMthly, 40, 30, 30)
+    eqtyDataMthly.set_index('Date', inplace=True)
     portfolio_Rtn = pd.DataFrame(calculate_portfolio_returns(eqtyDataMthly, 40, 30, 30), columns=['PtfRtns'])
     portfolio_Rtn.index = portfolio_Rtn.index.strftime('%Y-%m-%d')
     print("\nPortfolio Returns:")
@@ -240,34 +236,42 @@ except ValueError as e:
 # Independent variables are macro variables, dependent variable is portfolio return 
 #
 
-# Creating the retruns and macri variaables dataframe
-df = pd.concat([portfolio_Rtn, macro], axis=1)
+# Creating the returns and macro variaables dataframe
+macro_data.set_index('Date', inplace=True)
+macro_data.index = macro_data.index.strftime('%Y-%m-%d')
+df = pd.concat([portfolio_Rtn, macro_data], axis=1)
 df = df.dropna()
-
-
+df = df.sort_index()
 
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import Lasso
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LassoCV
+from sklearn.datasets import make_regression
+from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Example DataFrame (replace this with your actual data)
-dates = pd.date_range(start="2000-01-01", periods=100, freq="M")
-data = {
-    'Portfolio_Returns': np.random.normal(0, 0.01, len(dates)),
-    'Macro_Variable_1': np.random.normal(0, 0.02, len(dates)),
-    'Macro_Variable_2': np.random.normal(0, 0.02, len(dates)),
-    'Macro_Variable_3': np.random.normal(0, 0.02, len(dates))
-}
-df = pd.DataFrame(data, index=dates)
+#dates = pd.date_range(start="2000-01-01", periods=100, freq="M")
+#data = {
+#    'Portfolio_Returns': np.random.normal(0, 0.01, len(dates)),
+#    'Macro_Variable_1': np.random.normal(0, 0.02, len(dates)),
+#    'Macro_Variable_2': np.random.normal(0, 0.02, len(dates)),
+#    'Macro_Variable_3': np.random.normal(0, 0.02, len(dates))
+#}
+#df = pd.DataFrame(data, index=dates)
 
 # Rolling window size
 rolling_window = 24
 
 # Initialize results storage
 rolling_betas = []
+rolling_r2 = []
+rolling_alphas = []
 rolling_correlations = []
+correlation_series = {col: [] for col in ['FFRateMomChg_CPIMOM', 'FFRateMomChg_GoldRtnMoM', 'CPIMOM_GoldRtnMoM']}
 
 # Standardize the data
 def standardize(df):
@@ -280,15 +284,35 @@ for start in range(len(df) - rolling_window + 1):
     df_window = df.iloc[start:start + rolling_window]
 
     # Define dependent and independent variables
-    y = df_window['Portfolio_Returns']
-    X = df_window.drop(columns=['Portfolio_Returns'])
+    y = df_window['PtfRtns']
+    X = df_window.drop(columns=['PtfRtns'])
 
+
+    ###############################################################################################################
+    # Code block to find the best alpha for the rolling window using the cross-validation
+    
     # Standardize independent variables
     X_scaled = standardize(X)
+    
+    # Perform Lasso regression with cross-validation to find the best alpha
+    lasso_cv = LassoCV(alphas=None, cv=5, random_state=42)  # Automatically determines range of alphas
+    lasso_cv.fit(X_scaled, y)
+
+    # Best alpha
+    best_alpha = lasso_cv.alpha_
+    print(f"Best alpha: {best_alpha}")
 
     # Fit Lasso regression
-    lasso = Lasso(alpha=0.1, random_state=42)  # Adjust alpha as needed
+    lasso = Lasso(alpha=best_alpha, random_state=42)  # Best alpha for the window is selected using cross-validation
     lasso.fit(X_scaled, y)
+
+    # Store r2 (betas)
+    r2 = pd.Series(lasso.score(X_scaled, y), name=df.index[start + rolling_window - 1])
+    rolling_r2.append(r2)
+
+    # Store alphas used in regression
+    alphas = pd.Series(best_alpha, name=df.index[start + rolling_window - 1])
+    rolling_alphas.append(alphas)
 
     # Store regression coefficients (betas)
     betas = pd.Series(lasso.coef_, index=X.columns, name=df.index[start + rolling_window - 1])
@@ -298,19 +322,71 @@ for start in range(len(df) - rolling_window + 1):
     correlations = X.corr()
     rolling_correlations.append(correlations)
 
+    # Store average correlation for line plot
+    for col in correlation_series:
+        splitPrt = col.split('_')
+        #['FFRateMomChg_CPIMOM', 'FFRateMomChg_GoldRtnMoM', 'CPIMOM_GoldRtnMoM']
+        correlation_series[col].append(correlations.loc[splitPrt[0],splitPrt[1]])
+
 # Combine rolling betas into a DataFrame
 rolling_betas_df = pd.DataFrame(rolling_betas)
-
 # Plot rolling betas
-rolling_betas_df.plot(figsize=(12, 6), title="Rolling Betas")
+rolling_betas_df.plot(figsize=(12, 6), title="Rolling Betas Over Time")
 plt.xlabel("Date")
 plt.ylabel("Beta Coefficient")
 plt.grid()
 plt.show()
 
-# Plot rolling correlations
+# Create a box plot for the betas
+rolling_betas_df.boxplot(figsize=(10, 6), grid=True)
+# Customize the plot
+plt.title("Box Plot of Rolling Betas")
+plt.xlabel("Factors")
+plt.ylabel("Beta Coefficients")
+plt.grid(alpha=0.5)  # Lighten the grid
+plt.show()
+
+# Plot histograms for each beta variable
+rolling_betas_df.hist(figsize=(12, 8), bins=20, grid=True)
+# Customize the plot
+plt.suptitle("Distribution of Betas for Each Variable", fontsize=16)
+plt.xlabel("Beta Coefficient")
+plt.ylabel("Frequency")
+plt.show()
+
+# Plot density for each beta variable
+plt.figure(figsize=(12, 8))
+for column in rolling_betas_df.columns:
+    sns.kdeplot(rolling_betas_df[column], label=column, shade=True)
+
+# Customize the plot
+plt.title("Density Plot of Betas for Each Variable", fontsize=16)
+plt.xlabel("Beta Coefficient")
+plt.ylabel("Density")
+plt.legend(title="Variables")
+plt.grid(alpha=0.5)
+plt.show()
+
+# Plot r2 over time 
+rolling_r2_df = pd.DataFrame(rolling_r2)
+rolling_r2_df.plot(figsize=(12, 6), title="Rolling R2 Over Time")
+plt.xlabel("Date")
+plt.ylabel("R2")
+plt.legend().set_visible(False)
+plt.grid()
+plt.show()
+
+# Plot rolling correlations as line chart
+correlation_df = pd.DataFrame(correlation_series, index=df.index[rolling_window - 1:])
+correlation_df.plot(figsize=(12, 6), title="Rolling Correlations Over Time")
+plt.xlabel("Date")
+plt.ylabel("Correlations")
+plt.grid()
+plt.show()
+
+# Plot rolling correlations (heatmaps) for specific windows
 for i, corr_matrix in enumerate(rolling_correlations):
-    if i % 10 == 0:  # Plot every 10th window for visualization
+    if i % 25 == 0:  # Plot every 25th window for visualization
         plt.figure(figsize=(6, 5))
         plt.title(f"Rolling Correlations (Window Ending {df.index[rolling_window + i - 1]})")
         plt.imshow(corr_matrix, cmap="coolwarm", interpolation="none")
@@ -333,3 +409,19 @@ print("The rolling regression identifies how the portfolio returns are influence
 print("\n- For each window, the Lasso regression performs variable selection by shrinking some coefficients to zero.")
 print("\n- The rolling betas plot shows the time-varying contribution of each macro variable to portfolio returns.")
 print("\n- Rolling correlations reveal interdependencies among macro variables, helping to understand how they move together.")
+
+
+
+#################################################################################################################################################
+# Portfolio related metrics, take S&P 500 as benchmark 
+
+# Get the annualized return of portfolio and benchmark and plot
+# Get the portfolio vol 
+# Get the portfolio sharpe ratio
+# Plot portfolio cummulative returns and benchmark  returns 
+# Plot annualized rolling vol over time 
+# Plot rolling returns over time 
+# Add sortino ratio, max drawdown, calmar ratio for both portfolio and benchmark 
+# Add rolling return statistics as well with skew and kurtosis 
+
+
